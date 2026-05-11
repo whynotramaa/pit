@@ -1,1 +1,2 @@
 - [ ] Implement garbage collection for objects as each new updates makes new folder - so if hash is not in the index being used then we can remove it safely !
+- [ ] Read more about SHA1 Hash

@@ -139,6 +139,10 @@ class Repository:
         added_count = 0
 
         # recursively traverse directory
+        # create blob objects for all files
+        # store all blobs in object db (.git/objects)
+        # update the index to include all the files
+
         for file_path in full_path.rglob("*"):
             if file_path.is_file():
                 if ".pit" in file_path.parts or ".git" in file_path.parts:
@@ -160,10 +164,6 @@ class Repository:
 
         else:
             print(f"Directory {path} already up to date !")
-
-        # create blob objects for all files
-        # store all blobs in object db (.git/objects)
-        # update the index to include all the files
 
         pass
 

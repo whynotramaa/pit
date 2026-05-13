@@ -555,6 +555,148 @@ class Repository:
 
         return branches
 
+    def delete_branch(self, branch_name: str) -> bool:
+        current_branch = self.get_currrent_branch()
+        branch_file = self.heads_dir / branch_name
+
+        # Check if branch exists
+        if not branch_file.exists():
+            print(f"error: branch '{branch_name}' not found.")
+            return False
+
+        # Prevent deleting current branch
+        if branch_name == current_branch:
+            print(
+                f"error: Cannot delete the branch '{branch_name}' which you are currently on."
+            )
+            return False
+
+        # Prevent deleting master branch (safety measure)
+        if branch_name == "master":
+            print(f"error: Cannot delete branch 'master'.")
+            return False
+
+        # Delete the branch file
+        try:
+            branch_file.unlink()
+            print(f"Deleted branch '{branch_name}'")
+            return True
+        except Exception as e:
+            print(f"error: Failed to delete branch '{branch_name}': {e}")
+            return False
+
+    def status(self):
+        # Display current branch
+        current_branch = self.get_currrent_branch()
+        print(f"On branch {current_branch}")
+        print()
+
+        # Get index (staged files)
+        index = self.load_index()
+
+        # Initialize file status lists
+        staged_files = list(index.keys())
+        untracked_files = []
+        modified_unstaged_files = []
+        deleted_files = []
+
+        # Walk working directory to find untracked and modified files
+        for file_path in self.path.rglob("*"):
+            if file_path.is_file():
+                # Skip .pit directory
+                if ".pit" in file_path.parts or ".git" in file_path.parts:
+                    continue
+
+                rel_path = str(file_path.relative_to(self.path))
+
+                # Check if file is tracked (in index)
+                if rel_path not in index:
+                    untracked_files.append(rel_path)
+                else:
+                    # File is tracked - check if modified
+                    try:
+                        current_content = file_path.read_bytes()
+                        current_blob = Blob(current_content)
+                        current_hash = current_blob.hash()
+
+                        if current_hash != index[rel_path]:
+                            modified_unstaged_files.append(rel_path)
+                    except Exception as e:
+                        print(f"Warning: Could not read {rel_path}: {e}")
+
+        # Find deleted files (in index but not in working directory)
+        for indexed_file in index.keys():
+            full_path = self.path / indexed_file
+            if not full_path.exists():
+                deleted_files.append(indexed_file)
+
+        # Display staged files
+        if staged_files:
+            print("Changes to be committed:")
+
+            for file in sorted(staged_files):
+                print(f"\tmodified: {file}")
+            print()
+        else:
+            print("No changes added to commit.")
+            print()
+
+        # Display modified but unstaged files
+        if modified_unstaged_files:
+            print("Changes not staged for commit:")
+            print('  (use "pit add <file>..." to update what will be committed)')
+
+            for file in sorted(modified_unstaged_files):
+                print(f"\tmodified: {file}")
+            print()
+
+        # Display deleted files
+        if deleted_files:
+            if not modified_unstaged_files:
+                print("Changes not staged for commit:")
+
+            for file in sorted(deleted_files):
+                print(f"\tdeleted: {file}")
+            print()
+
+        # Display untracked files
+        if untracked_files:
+            print("Untracked files:")
+            print('  (use "pit add <file>..." to include in what will be committed)')
+            for file in sorted(untracked_files):
+                print(f"\t{file}")
+            print()
+
+        # Summary message
+        if (
+            not staged_files
+            and not modified_unstaged_files
+            and not deleted_files
+            and not untracked_files
+        ):
+            print("working tree clean")
+
+    def log(self, max_count: int = 10):
+        current_branch = self.get_currrent_branch()
+        commit_hash = self.get_branch_commit(current_branch)
+
+        if not commit_hash:
+            print("No commits yet!")
+            return
+
+        count = 0
+        while commit_hash and count < max_count:
+            commit_obj = self.load_object(commit_hash)
+            commit = Commit.from_content(commit_obj.content)
+
+            print(f"Commit: {commit_hash}")
+            print(f"Author: {commit.author}")
+            print(f"Date: {time.ctime(commit.timestamp)}")
+            print(f"\n   {commit.message}\n")
+
+            commit_hash = commit.parent_hashes[0] if commit.parent_hashes else None
+            count += 1
+
 
 def main():
     parser = argparse.ArgumentParser(description="PyGit - Git Reimagined")
@@ -589,6 +731,26 @@ def main():
 
     # branch command
     branch_parser = subparsers.add_parser("branch", help="List and manage branches")
+    branch_parser.add_argument(
+        "branch_name",
+        nargs="?",
+        help="Branch name (required with -d flag)",
+    )
+    branch_parser.add_argument(
+        "-d",
+        "--delete",
+        action="store_true",
+        help="Delete a branch",
+    )
+
+    # log command
+    log_parser = subparsers.add_parser("log", help="prints the log of commits")
+    log_parser.add_argument(
+        "-n", "--max-count", type=int, default=10, help="Limit commits showm"
+    )
+
+    # status command
+    status_parser = subparsers.add_parser("status", help="Show working tree status")
 
     args = parser.parse_args()
 
@@ -629,18 +791,35 @@ def main():
             if not repo.git_dir.exists():
                 print("Not a pit repository - maybe try doin `pit init` first")
                 return
-            branches = repo.list_branches()
-            if branches:
-                for branch in branches:
-                    print(branch)
+
+            if args.delete:
+                if not args.branch_name:
+                    print("error: branch name required with -d flag")
+                    return
+                repo.delete_branch(args.branch_name)
             else:
-                print("No branches found.")
+                branches = repo.list_branches()
+                if branches:
+                    for branch in branches:
+                        print(branch)
+                else:
+                    print("No branches found.")
+
+        elif args.command == "log":
+            if not repo.git_dir.exists():
+                print("Not a git repo")
+                return
+            repo.log(args.max_count)
+
+        elif args.command == "status":
+            if not repo.git_dir.exists():
+                print("Not a pit repository - maybe try doin `pit init` first")
+                return
+            repo.status()
 
     except Exception as e:
         print(f"Error -> {e}")
         sys.exit(1)
-
-    print(args)
 
 
 main()

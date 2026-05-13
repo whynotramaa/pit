@@ -1,1 +1,8 @@
-{}
+{
+  "main.py": "c35066e5005012f11614b69ec6678f9d259b989f",
+  "README.md": "883c7a7b5279530c1541f4e09b8cc28a8d2a4838",
+  "todo.md": "9f31298b5660c3f76f0b300f3c524ae7cff208ca",
+  "notes\\add-logic.md": "b0986a0c7a9ad8a16c46e82ea3bc76918e22f2c6",
+  "notes\\branch-checkout-logic.md": "f873baa67f9d8b8bc9d2d619e97d200b5bc612b7",
+  "notes\\commit-logic.md": "803e77f7367abe839e12e70eefd62a18a34d7b03"
+}

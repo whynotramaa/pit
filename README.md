@@ -15,8 +15,8 @@
 ║                                                                  ║
 ╚══════════════════════════════════════════════════════════════════╝
 ```
-
 **pit** is a minimal yet functional version control system written in pure Python. It demonstrates Git-like functionality including object storage, branching, committing, and garbage collection.
+
 
 ## Features
 
@@ -29,9 +29,9 @@
 
 ## Installation
 
-### From PyPI (coming soon)
+### From PyPI
 ```bash
-pip install pit-cli
+pip install pit-cli-ramaa
 ```
 
 ### From Source

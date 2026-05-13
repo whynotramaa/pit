@@ -9,13 +9,12 @@ import zlib
 import time
 
 
-class GitObject:
+class pitObject:
     def __init__(self, obj_type: str, content: bytes):
         self.type = obj_type
         self.content = content
 
     def hash(self) -> str:
-        # f(<type><size>\0<content>)
         header = f"{self.type} {len(self.content)}\0".encode()
         return hashlib.sha1(header + self.content).hexdigest()
 
@@ -24,7 +23,7 @@ class GitObject:
         return zlib.compress(header + self.content)
 
     @classmethod
-    def deserialize(cls, data: bytes) -> GitObject:
+    def deserialize(cls, data: bytes) -> pitObject:
         decompressed = zlib.decompress(data)
         null_idx = decompressed.find(b"\0")
         header = decompressed[:null_idx]
@@ -36,29 +35,22 @@ class GitObject:
         return cls(obj_type, content)
 
 
-class Blob(GitObject):
+class Blob(pitObject):
     def __init__(self, content: bytes):
         super().__init__("blob", content)
 
 
-class Tree(GitObject):
-    def __init__(
-        self, entries: List[Tuple[str, str, str]] = None
-    ):  # mode name hash - str str str
+class Tree(pitObject):
+    def __init__(self, entries: List[Tuple[str, str, str]] = None):
         self.entries = entries or []
         content = self._serialize_entries()
         super().__init__("tree", content)
 
     def _serialize_entries(self) -> bytes:
-        # <mode> <name> \0 <hash>
         content = b""
-        for mode, name, obj_hash in sorted(
-            self.entries
-        ):  # sorting bcz SHA1 hashing is different for hi.txt - hello.txt and hello.txt - hi.txt -> therefore could cause two diff commits
+        for mode, name, obj_hash in sorted(self.entries):
             content += f"{mode} {name} \0".encode()
-            content += bytes.fromhex(
-                obj_hash
-            )  # bcz in serialize funcn above we are doing hexdigest() so to change it back to bytes we do this
+            content += bytes.fromhex(obj_hash)
 
         return content
 
@@ -73,15 +65,12 @@ class Tree(GitObject):
 
         while i < len(content):
             null_idx = content.find(b"\0", i)
-            # 100644 README.md\0[20Bytes of content SHA1 hash]100645 README.md\0[20 bytes] ==> if we dont use ,i in .find() it would return first idx where it found \0 and then restart with i = 0
             if null_idx == -1:
                 break
 
             mode_name = content[i:null_idx].decode()
-            mode, name = mode_name.split(" ", 1)  # ,1 means it will only split once
-            obj_hash = content[
-                null_idx + 1 : null_idx + 21
-            ].hex()  # 21 because SHA1 is sure to give 20 bytes of hash
+            mode, name = mode_name.split(" ", 1)
+            obj_hash = content[null_idx + 1 : null_idx + 21].hex()
             tree.entries.append((mode, name, obj_hash))
 
             i = null_idx + 21
@@ -89,7 +78,7 @@ class Tree(GitObject):
         return tree
 
 
-class Commit(GitObject):
+class Commit(pitObject):
     def __init__(
         self,
         tree_hash: str,
@@ -120,9 +109,7 @@ class Commit(GitObject):
         lines.append("")
         lines.append(self.message)
 
-        return "\n".join(
-            lines
-        ).encode()  # normally concatenating string takes more time than turning it into lists and rejoining
+        return "\n".join(lines).encode()
 
     @classmethod
     def from_content(cls, content: bytes) -> Commit:
@@ -135,7 +122,7 @@ class Commit(GitObject):
 
         for i, line in enumerate(lines):
             if line.startswith("tree "):
-                tree_hash = line[5:]  # 5 because tree<space>  has 5 chars
+                tree_hash = line[5:]
 
             elif line.startswith("parent "):
                 parent_hashes.append(line[7:])
@@ -163,46 +150,38 @@ class Commit(GitObject):
 class Repository:
     def __init__(self, path="."):
         self.path = Path(path).resolve()
-        self.git_dir = self.path / ".pit"
+        self.pit_dir = self.path / ".pit"
 
-        # pit/objects
-        self.objects_dir = self.git_dir / "objects"
+        self.objects_dir = self.pit_dir / "objects"
 
-        # pit/refs
-        self.refs_dir = self.git_dir / "refs"
+        self.refs_dir = self.pit_dir / "refs"
         self.heads_dir = self.refs_dir / "heads"
 
-        # pit/HEAD
-        self.head_file = self.git_dir / "HEAD"
+        self.head_file = self.pit_dir / "HEAD"
 
-        # pit/index
-        self.index_file = self.git_dir / "index"
+        self.index_file = self.pit_dir / "index"
 
     def init(self) -> bool:
 
-        if self.git_dir.exists():
+        if self.pit_dir.exists():
             return False
 
-        # making folders with given vars
-        self.git_dir.mkdir()
+        self.pit_dir.mkdir()
         self.objects_dir.mkdir()
         self.refs_dir.mkdir()
         self.heads_dir.mkdir()
 
-        # other two are files and not directories
-        self.head_file.write_text(
-            "ref: refs/heads/master\n"
-        )  # write in heads and not head
+        self.head_file.write_text("ref: refs/heads/master\n")
 
         self.save_index({})
 
         self.index_file.write_text(json.dumps({}, indent=2))
 
-        print(f"Initialized empty pit repository in {self.git_dir} ")
+        print(f"Initialized empty pit repository in {self.pit_dir} ")
 
         return True
 
-    def store_object(self, obj: GitObject):
+    def store_object(self, obj: pitObject):
         obj_hash = obj.hash()
         obj_dir = self.objects_dir / obj_hash[:2]
         obj_file = obj_dir / obj_hash[2:]
@@ -231,16 +210,12 @@ class Repository:
         if not full_path.exists():
             raise FileNotFoundError(f"Path {path} not found!")
 
-        # read file content
         content = full_path.read_bytes()
 
-        # create BLOB object from the content
         blob = Blob(content)
 
-        # store the blob object in local database aka file-system (.git/objects)
         blob_hash = self.store_object(blob)
 
-        # update the index to include the file
         index = self.load_index()
         index[path] = blob_hash
         self.save_index(index)
@@ -258,22 +233,15 @@ class Repository:
         index = self.load_index()
         added_count = 0
 
-        # recursively traverse directory
-        # create blob objects for all files
-        # store all blobs in object db (.git/objects)
-        # update the index to include all the files
-
         for file_path in full_path.rglob("*"):
             if file_path.is_file():
-                if ".pit" in file_path.parts or ".git" in file_path.parts:
+                if ".pit" in file_path.parts or ".pit" in file_path.parts:
                     continue
 
-                # create & store blob object
                 content = file_path.read_bytes()
                 blob = Blob(content)
                 blob_hash = self.store_object(blob)
 
-                # update index
                 rel_path = str(file_path.relative_to(self.path))
                 index[rel_path] = blob_hash
                 added_count += 1
@@ -302,14 +270,14 @@ class Repository:
         else:
             raise ValueError(f"{path} is neither a file nor directory - UNSUPPORTED")
 
-    def load_object(self, obj_hash: str) -> GitObject:
+    def load_object(self, obj_hash: str) -> pitObject:
         obj_dir = self.objects_dir / obj_hash[:2]
         obj_file = obj_dir / obj_hash[2:]
 
         if not obj_file.exists():
             raise FileNotFoundError(f"Object {obj_hash} not found")
 
-        return GitObject.deserialize(obj_file.read_bytes())
+        return pitObject.deserialize(obj_file.read_bytes())
 
     def create_tree_from_index(self):
         index = self.load_index()
@@ -323,7 +291,7 @@ class Repository:
         for file_path, blob_hash in index.items():
             parts = file_path.split("/")
 
-            if len(parts) == 1:  # root directory
+            if len(parts) == 1:
                 files[parts[0]] = blob_hash
             else:
                 dir_name = parts[0]
@@ -331,25 +299,20 @@ class Repository:
                     dirs[dir_name] = {}
                 current = dirs[dir_name]
 
-                for part in parts[1:-1]:  # skipping the last part / element
+                for part in parts[1:-1]:
                     if part not in current:
                         current[part] = {}
 
                     current = current[part]
 
-                current[parts[-1]] = (
-                    blob_hash  # assigning last element to current which is = blob_hash
-                )
+                current[parts[-1]] = blob_hash
 
-        # Mode ==> 100644 -> file and 40000 -> Directory
         def create_tree_recusrively(entries_dict: Dict):
-            tree = Tree()  # empty tree
+            tree = Tree()
 
             for name, blob_hash in entries_dict.items():
                 if isinstance(blob_hash, str):
-                    tree.add_entry(
-                        "100644", name, blob_hash
-                    )  # populates tree with filename
+                    tree.add_entry("100644", name, blob_hash)
 
                 if isinstance(blob_hash, dict):
                     subtreee_hash = create_tree_recusrively(blob_hash)
@@ -360,9 +323,7 @@ class Repository:
         root_entries = {**files}
 
         for dir_name, dir_contents in dirs.items():
-            root_entries[dir_name] = (
-                dir_contents  # creates a single dictionary with everything, files, folders,etc.
-            )
+            root_entries[dir_name] = dir_contents
 
         return create_tree_recusrively(root_entries)
 
@@ -372,7 +333,7 @@ class Repository:
         head_content = self.head_file.read_text().strip()
 
         if head_content.startswith("ref: refs/heads"):
-            return head_content[16:]  # 16 letters already written in startwith
+            return head_content[16:]
 
         return "HEAD"
 
@@ -390,7 +351,6 @@ class Repository:
 
     def commit(self, message: str, author: str = "pit user <user@pit.com>"):
 
-        # create a tree object from index (staging area)
         tree_hash = self.create_tree_from_index()
 
         current_branch = self.get_currrent_branch()
@@ -403,11 +363,9 @@ class Repository:
             print("nothing to commit, working tree is clean")
             return None
 
-        # if there has been no changes before commiting - we have to check tree hashes to ensure they are not same
-
         if parent_commit:
-            parent_git_commit_object = self.load_object(parent_commit)
-            parent_commit_data = Commit.from_content(parent_git_commit_object.content)
+            parent_pit_commit_object = self.load_object(parent_commit)
+            parent_commit_data = Commit.from_content(parent_pit_commit_object.content)
             if tree_hash == parent_commit_data.tree_hash:
                 print("Nothing to commit, working tree clean")
                 return None
@@ -433,7 +391,6 @@ class Repository:
         try:
             tree_obj = self.load_object(tree_hash)
             tree = Tree.from_content(tree_obj.content)
-            # we had tree as list<tuple<str,str,str>>
             for mode, name, obj_hash in tree.entries:
                 full_name = f"{prefix}{name}"
                 if mode.startswith("100"):
@@ -450,7 +407,6 @@ class Repository:
         return files
 
     def checkout(self, branch: str, create_branch: bool):
-        # computed files to clear from previous commit
         prev_branch = self.get_currrent_branch()
         files_to_clear = set()
         try:
@@ -466,7 +422,6 @@ class Repository:
         except Exception:
             files_to_clear = set()
 
-        # created a new branch
         branch_file = self.heads_dir / branch
 
         if not branch_file.exists():
@@ -488,14 +443,12 @@ class Repository:
                 print("Use ___ checkout -b '{branch}' to create and switch to a branch")
                 return
         else:
-            # Branch exists
             if create_branch:
                 print(f"Branch `{branch}` already exists.")
                 return
 
             self.head_file.write_text(f"ref: refs/heads/{branch}\n")
 
-            # restoring working directory
             self.restore_working_dir(branch, files_to_clear)
             print(f"Switched to branch `{branch}` ")
 
@@ -504,7 +457,6 @@ class Repository:
         tree_obj = self.load_object(tree_hash)
         tree = Tree.from_content(tree_obj.content)
 
-        # we had tree as list<tuple<str,str,str>>
         for mode, name, obj_hash in tree.entries:
             file_path = path / name
 
@@ -523,7 +475,6 @@ class Repository:
         if not target_commit_hash:
             return
 
-        # remove files tracked by previous branch
         for rel_path in sorted(files_to_clear):
             file_path = self.path / rel_path
             try:
@@ -559,24 +510,20 @@ class Repository:
         current_branch = self.get_currrent_branch()
         branch_file = self.heads_dir / branch_name
 
-        # Check if branch exists
         if not branch_file.exists():
             print(f"error: branch '{branch_name}' not found.")
             return False
 
-        # Prevent deleting current branch
         if branch_name == current_branch:
             print(
                 f"error: Cannot delete the branch '{branch_name}' which you are currently on."
             )
             return False
 
-        # Prevent deleting master branch (safety measure)
         if branch_name == "master":
             print(f"error: Cannot delete branch 'master'.")
             return False
 
-        # Delete the branch file
         try:
             branch_file.unlink()
             print(f"Deleted branch '{branch_name}'")
@@ -586,34 +533,27 @@ class Repository:
             return False
 
     def status(self):
-        # Display current branch
         current_branch = self.get_currrent_branch()
         print(f"On branch {current_branch}")
         print()
 
-        # Get index (staged files)
         index = self.load_index()
 
-        # Initialize file status lists
         staged_files = list(index.keys())
         untracked_files = []
         modified_unstaged_files = []
         deleted_files = []
 
-        # Walk working directory to find untracked and modified files
         for file_path in self.path.rglob("*"):
             if file_path.is_file():
-                # Skip .pit directory
-                if ".pit" in file_path.parts or ".git" in file_path.parts:
+                if ".pit" in file_path.parts or ".pit" in file_path.parts:
                     continue
 
                 rel_path = str(file_path.relative_to(self.path))
 
-                # Check if file is tracked (in index)
                 if rel_path not in index:
                     untracked_files.append(rel_path)
                 else:
-                    # File is tracked - check if modified
                     try:
                         current_content = file_path.read_bytes()
                         current_blob = Blob(current_content)
@@ -624,13 +564,11 @@ class Repository:
                     except Exception as e:
                         print(f"Warning: Could not read {rel_path}: {e}")
 
-        # Find deleted files (in index but not in working directory)
         for indexed_file in index.keys():
             full_path = self.path / indexed_file
             if not full_path.exists():
                 deleted_files.append(indexed_file)
 
-        # Display staged files
         if staged_files:
             print("Changes to be committed:")
 
@@ -641,7 +579,6 @@ class Repository:
             print("No changes added to commit.")
             print()
 
-        # Display modified but unstaged files
         if modified_unstaged_files:
             print("Changes not staged for commit:")
             print('  (use "pit add <file>..." to update what will be committed)')
@@ -650,7 +587,6 @@ class Repository:
                 print(f"\tmodified: {file}")
             print()
 
-        # Display deleted files
         if deleted_files:
             if not modified_unstaged_files:
                 print("Changes not staged for commit:")
@@ -659,7 +595,6 @@ class Repository:
                 print(f"\tdeleted: {file}")
             print()
 
-        # Display untracked files
         if untracked_files:
             print("Untracked files:")
             print('  (use "pit add <file>..." to include in what will be committed)')
@@ -667,7 +602,6 @@ class Repository:
                 print(f"\t{file}")
             print()
 
-        # Summary message
         if (
             not staged_files
             and not modified_unstaged_files
@@ -697,29 +631,119 @@ class Repository:
             commit_hash = commit.parent_hashes[0] if commit.parent_hashes else None
             count += 1
 
+    def _collect_reachable_objects(self, obj_hash: str, reachable: set) -> set:
+        """Recursively collect all reachable objects from a given object hash."""
+        if obj_hash in reachable:
+            return reachable
+
+        reachable.add(obj_hash)
+
+        try:
+            obj = self.load_object(obj_hash)
+
+            if obj.type == "commit":
+                commit = Commit.from_content(obj.content)
+                # Add tree object
+                if commit.tree_hash:
+                    self._collect_reachable_objects(commit.tree_hash, reachable)
+                # Add parent commits
+                for parent_hash in commit.parent_hashes:
+                    if parent_hash:
+                        self._collect_reachable_objects(parent_hash, reachable)
+
+            elif obj.type == "tree":
+                tree = Tree.from_content(obj.content)
+                # Add all entries in tree
+                for mode, name, entry_hash in tree.entries:
+                    if entry_hash:
+                        self._collect_reachable_objects(entry_hash, reachable)
+
+        except Exception as e:
+            print(f"Warning: Could not process object {obj_hash}: {e}")
+
+        return reachable
+
+    def _get_all_stored_objects(self) -> set:
+        """Get all object hashes currently stored in the repository."""
+        all_objects = set()
+
+        if not self.objects_dir.exists():
+            return all_objects
+
+        for obj_dir in self.objects_dir.iterdir():
+            if obj_dir.is_dir():
+                for obj_file in obj_dir.iterdir():
+                    if obj_file.is_file():
+                        obj_hash = obj_dir.name + obj_file.name
+                        all_objects.add(obj_hash)
+
+        return all_objects
+
+    def _get_reachable_objects(self) -> set:
+        """Get all objects reachable from branch commits."""
+        reachable = set()
+
+        # Collect all objects reachable from all branches
+        if self.heads_dir.exists():
+            for branch_file in self.heads_dir.iterdir():
+                if branch_file.is_file():
+                    commit_hash = branch_file.read_text().strip()
+                    if commit_hash:
+                        self._collect_reachable_objects(commit_hash, reachable)
+
+        return reachable
+
+    def garbage_collect(self) -> int:
+        """Remove unreachable objects from the repository.
+
+        Returns the number of objects deleted.
+        """
+        all_objects = self._get_all_stored_objects()
+        reachable_objects = self._get_reachable_objects()
+
+        unreachable_objects = all_objects - reachable_objects
+        deleted_count = 0
+
+        for obj_hash in unreachable_objects:
+            try:
+                obj_dir = self.objects_dir / obj_hash[:2]
+                obj_file = obj_dir / obj_hash[2:]
+
+                if obj_file.exists():
+                    obj_file.unlink()
+                    deleted_count += 1
+
+                # Remove empty directory if it becomes empty
+                if obj_dir.exists() and not list(obj_dir.iterdir()):
+                    obj_dir.rmdir()
+
+            except Exception as e:
+                print(f"Warning: Could not delete object {obj_hash}: {e}")
+
+        if deleted_count > 0:
+            print(f"Garbage collection: removed {deleted_count} unreachable object(s)")
+        else:
+            print("Garbage collection: no unreachable objects found")
+
+        return deleted_count
+
 
 def main():
-    parser = argparse.ArgumentParser(description="PyGit - Git Reimagined")
+    parser = argparse.ArgumentParser(description="Pypit - pit Reimagined")
     subparsers = parser.add_subparsers(dest="command", help="Available Commands")
 
-    # init command
     init_parser = subparsers.add_parser("init", help="Initialize a new repository")
 
-    # add command
     add_parser = subparsers.add_parser(
         "add", help="Adds files and folders to the staging area."
     )
-    add_parser.add_argument(
-        "paths", nargs="+", help="Files and directories to add"
-    )  # (?) -> 0 or 1 args and (*) -> 0 or any no of args
+    add_parser.add_argument("paths", nargs="+", help="Files and directories to add")
 
-    # commit command
     commit_parser = subparsers.add_parser("commit", help="Creates a new commit")
 
     commit_parser.add_argument("-m", "--message", help="Commit message", required=True)
     commit_parser.add_argument("-a", "--author", help="Author of the commit ")
 
-    # checkout command
     checkout_parser = subparsers.add_parser("checkout", help="Move/Create a new branch")
     checkout_parser.add_argument("branch", help="Branch to switch to")
     checkout_parser.add_argument(
@@ -729,7 +753,6 @@ def main():
         help="Create and switch a new branch",
     )
 
-    # branch command
     branch_parser = subparsers.add_parser("branch", help="List and manage branches")
     branch_parser.add_argument(
         "branch_name",
@@ -743,14 +766,16 @@ def main():
         help="Delete a branch",
     )
 
-    # log command
     log_parser = subparsers.add_parser("log", help="prints the log of commits")
     log_parser.add_argument(
         "-n", "--max-count", type=int, default=10, help="Limit commits showm"
     )
 
-    # status command
     status_parser = subparsers.add_parser("status", help="Show working tree status")
+
+    gc_parser = subparsers.add_parser(
+        "gc", help="Garbage collection - remove unreachable objects"
+    )
 
     args = parser.parse_args()
 
@@ -767,28 +792,28 @@ def main():
                 return
 
         elif args.command == "add":
-            if not repo.git_dir.exists():
+            if not repo.pit_dir.exists():
                 print("Not a pit repository - maybe try doin `pit init` first")
                 return
 
             for path in args.paths:
                 repo.add_path(path)
         elif args.command == "commit":
-            if not repo.git_dir.exists():
-                print("Not a git repository")
+            if not repo.pit_dir.exists():
+                print("Not a pit repository")
                 return
 
             author = args.author or "pit user <user@pit.com>"
             repo.commit(args.message)
 
         elif args.command == "checkout":
-            if not repo.git_dir.exists():
-                print("Not a git repo")
+            if not repo.pit_dir.exists():
+                print("Not a pit repo")
                 return
             repo.checkout(args.branch, args.create_branch)
 
         elif args.command == "branch":
-            if not repo.git_dir.exists():
+            if not repo.pit_dir.exists():
                 print("Not a pit repository - maybe try doin `pit init` first")
                 return
 
@@ -806,20 +831,23 @@ def main():
                     print("No branches found.")
 
         elif args.command == "log":
-            if not repo.git_dir.exists():
-                print("Not a git repo")
+            if not repo.pit_dir.exists():
+                print("Not a pit repo")
                 return
             repo.log(args.max_count)
 
         elif args.command == "status":
-            if not repo.git_dir.exists():
+            if not repo.pit_dir.exists():
                 print("Not a pit repository - maybe try doin `pit init` first")
                 return
             repo.status()
 
+        elif args.command == "gc":
+            if not repo.pit_dir.exists():
+                print("Not a pit repository - maybe try doin `pit init` first")
+                return
+            repo.garbage_collect()
+
     except Exception as e:
         print(f"Error -> {e}")
         sys.exit(1)
-
-
-main()

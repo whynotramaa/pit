@@ -192,6 +192,9 @@ class Repository:
 
         return obj_hash
 
+    def _is_internal_path(self, file_path: Path) -> bool:
+        return ".pit" in file_path.parts or ".git" in file_path.parts
+
     def load_index(self) -> Dict[str, str]:
         if not self.index_file.exists():
             return {}
@@ -235,7 +238,7 @@ class Repository:
 
         for file_path in full_path.rglob("*"):
             if file_path.is_file():
-                if ".pit" in file_path.parts or ".pit" in file_path.parts:
+                if self._is_internal_path(file_path):
                     continue
 
                 content = file_path.read_bytes()
@@ -460,13 +463,16 @@ class Repository:
         for mode, name, obj_hash in tree.entries:
             file_path = path / name
 
+            if self._is_internal_path(file_path):
+                continue
+
             if mode.startswith("100"):
                 blob_obj = self.load_object(obj_hash)
                 blob = Blob(blob_obj.content)
                 file_path.write_bytes(blob.content)
 
             elif mode.startswith("400"):
-                file_path.mkdir(exist_ok=True)
+                file_path.mkdir(parents=True, exist_ok=True)
                 self.restore_tree(obj_hash, file_path)
 
     def restore_working_dir(self, branch: str, files_to_clear: Optional[set]):
@@ -546,7 +552,7 @@ class Repository:
 
         for file_path in self.path.rglob("*"):
             if file_path.is_file():
-                if ".pit" in file_path.parts or ".pit" in file_path.parts:
+                if self._is_internal_path(file_path):
                     continue
 
                 rel_path = str(file_path.relative_to(self.path))

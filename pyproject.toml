@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "pit-cli"
+name = "pit-cli-rama"
 version = "0.1.0"
 description = "A lightweight version control system built in Python"
 readme = "README.md"

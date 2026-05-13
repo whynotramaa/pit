@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pit-cli"
+version = "0.1.0"
+description = "A lightweight version control system built in Python"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "Rama", email = "hire.ramaa@gmail.com" }
+]
+keywords = ["git", "version-control", "vcs", "scm", "repository"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Version Control",
+    "Topic :: System :: Shells",
+]
+
+[project.urls]
+Homepage = "https://github.com/whynotramaa/pit-cli"
+Documentation = "https://github.com/whynotramaa/pit-cli#readme"
+Repository = "https://github.com/whynotramaa/pit-cli.git"
+"Bug Tracker" = "https://github.com/whynotramaa/pit-cli/issues"
+
+[project.scripts]
+pit = "pit:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pit"]
